@@ -18,17 +18,26 @@ from scipy.signal import savgol_filter
 import streamlit as st
 import plotly.graph_objs as go
 
+# --- autorefresh opcional (no rompe si no está instalado) ---
+_st_autorefresh = None
+try:
+    import importlib
+    _module = importlib.import_module("streamlit_extras.app_autorefresh")
+    _st_autorefresh = getattr(_module, "st_autorefresh", None)
+except Exception:
+    _st_autorefresh = None  # fallback con st.rerun()
+
 # ------------------- Config de página -------------------
 st.set_page_config(page_title="SmartSensor Dashboard", page_icon="📈", layout="wide")
 
 APP_TITLE = "SmartSensor Industrial Dashboard (Streamlit)"
-SAMPLE_PERIOD_MS = 1000          # refresco de 1 s
+SAMPLE_PERIOD_MS = 1000
 DEFAULT_BUFFER = 180
-ALERT_COOLDOWN_S = 60            # anti-spam de alertas (s)
+ALERT_COOLDOWN_S = 60
 
 # ------------------- Helpers de credenciales -------------------
 def get_secret(key: str, default: str = "") -> str:
-    # 1) st.secrets (Streamlit Cloud)  2) variables de entorno (local)
+    # 1) Streamlit Cloud (st.secrets)  2) Local (.env/entorno)
     try:
         return st.secrets[key]
     except Exception:
@@ -49,15 +58,15 @@ if "t" not in st.session_state:
 
 # ------------------- Funciones core -------------------
 def notify_email(subject: str, body: str) -> str:
-    missing = []
+    faltan = []
     if not SMTP_USER: 
-        missing.append("SMTP_USER")
+        faltan.append("SMTP_USER")
     if not SMTP_PASS: 
-        missing.append("SMTP_PASS")
+        faltan.append("SMTP_PASS")
     if not ALERT_TO:  
-        missing.append("ALERT_TO")
-    if missing:
-        return f"Email ✗ (faltan vars: {', '.join(missing)})"
+        faltan.append("ALERT_TO")
+    if faltan:
+        return f"Email ✗ (faltan vars: {', '.join(faltan)})"
     try:
         msg = EmailMessage()
         msg["From"] = SMTP_USER
@@ -84,7 +93,7 @@ def filtro_mediana(x, w):
 def filtro_exp(x, alpha):
     alpha = float(np.clip(alpha, 0.01, 0.99))
     y = np.zeros_like(x, dtype=float)
-    if len(x) == 0: 
+    if len(x) == 0:
         return y
     y[0] = x[0]
     for i in range(1, len(x)):
@@ -94,7 +103,7 @@ def filtro_exp(x, alpha):
 def filtro_savgol(x, w, p):
     if len(x) < 3:
         return np.array(x, dtype=float)
-    w = max(3, int(w) | 1)  # impar
+    w = max(3, int(w) | 1)
     if w >= len(x):
         w = len(x)-1 if (len(x)-1) % 2 == 1 else len(x)-2
     p = int(np.clip(p, 1, 5))
@@ -156,19 +165,19 @@ sgp   = st.sidebar.slider("Savitzky (orden)", 1, 5, 2, 1)
 
 st.sidebar.markdown("---")
 alerts_on = st.sidebar.toggle("Alertas activas", value=True)
-col1, col2 = st.sidebar.columns(2)
-temp_warn = col1.number_input("Temp warn (°C)", value=35.0, step=0.5)
-temp_crit = col2.number_input("Temp crit (°C)", value=40.0, step=0.5)
-col3, col4 = st.sidebar.columns(2)
-hum_warn  = col3.number_input("Hum warn (%)", value=70.0, step=1.0)
-hum_crit  = col4.number_input("Hum crit (%)", value=85.0, step=1.0)
+c1, c2 = st.sidebar.columns(2)
+temp_warn = c1.number_input("Temp warn (°C)", value=35.0, step=0.5)
+temp_crit = c2.number_input("Temp crit (°C)", value=40.0, step=0.5)
+c3, c4 = st.sidebar.columns(2)
+hum_warn  = c3.number_input("Hum warn (%)", value=70.0, step=1.0)
+hum_crit  = c4.number_input("Hum crit (%)", value=85.0, step=1.0)
 
 st.sidebar.markdown("---")
 filters_on = st.sidebar.multiselect(
     "Mostrar filtros", ["Media", "Mediana", "Exp", "Savitzky"],
     default=["Media", "Mediana", "Exp", "Savitzky"]
 )
-auto = st.sidebar.toggle("Auto-refresh (1 s)", value=True)
+auto = st.sidebar.toggle("Auto-refresh (1s)", value=True)
 
 if st.sidebar.button("Probar Alerta (Email)"):
     st.sidebar.success(notify_email("🧪 Test SmartSensor", f"Prueba {pd.Timestamp.now()}"))
@@ -179,10 +188,6 @@ if st.session_state.t.maxlen != buf:
     st.session_state.temp = deque(st.session_state.temp, maxlen=buf)
     st.session_state.hum  = deque(st.session_state.hum,  maxlen=buf)
 
-# Auto-refresh SIN streamlit_extras (simple y compatible)
-if auto:
-    time.sleep(SAMPLE_PERIOD_MS / 1000.0)
-    st.rerun()
 
 # ------------------- Simulación (un tick por render) -------------------
 n = (st.session_state.t[-1] + 1) if len(st.session_state.t) else 0
@@ -259,3 +264,11 @@ fig_h.update_layout(template="plotly_dark", height=360, margin=dict(l=30, r=20, 
 colB.plotly_chart(fig_h, use_container_width=True)
 
 st.info("En la nube, carga credenciales en *Settings → Secrets*. Localmente usa `.streamlit/secrets.toml`.")
+
+# --- Auto-refresh al final (para no interrumpir el render) ---
+if auto:
+    if _st_autorefresh:  # si streamlit-extras está instalado
+        _st_autorefresh(interval=SAMPLE_PERIOD_MS, key="autorefresh")
+    else:                # fallback local sin extras
+        time.sleep(SAMPLE_PERIOD_MS / 1000.0)
+        st.rerun()
