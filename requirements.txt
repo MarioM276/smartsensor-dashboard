@@ -5,3 +5,4 @@ numpy
 scipy
 streamlit-extras
 python-dotenv
+streamlit-extras==0.4.0
