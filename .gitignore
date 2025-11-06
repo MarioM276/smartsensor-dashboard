@@ -2,11 +2,13 @@
 __pycache__/
 *.pyc
 
-# Entornos / IDE
-.venv/
+# Entornos virtuales
 venv/
-.env
-*.code-workspace
+.venv/
 
-# Streamlit secretos locales
+# Credenciales locales
+.env
 .streamlit/secrets.toml
+
+# Otros
+.DS_Store
