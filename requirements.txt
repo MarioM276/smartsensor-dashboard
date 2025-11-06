@@ -3,3 +3,4 @@ plotly
 numpy
 pandas
 scipy
+streamlit-extras==0.4.0
