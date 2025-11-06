@@ -33,7 +33,7 @@ st.set_page_config(page_title="SmartSensor Dashboard", page_icon="📈", layout=
 APP_TITLE = "SmartSensor Industrial Dashboard (Streamlit)"
 SAMPLE_PERIOD_MS = 1000
 DEFAULT_BUFFER = 180
-ALERT_COOLDOWN_S = 60
+ALERT_COOLDOWN_S = 60  # anti-spam
 
 # ------------------- Helpers de credenciales -------------------
 def get_secret(key: str, default: str = "") -> str:
@@ -49,12 +49,14 @@ SMTP_USER = get_secret("SMTP_USER", "")
 SMTP_PASS = get_secret("SMTP_PASS", "")
 ALERT_TO  = [m.strip() for m in get_secret("ALERT_TO", "").split(",") if m.strip()]
 
-# ------------------- Estado (buffers) -------------------
+# ------------------- Estado -------------------
 if "t" not in st.session_state:
     st.session_state.t = deque(maxlen=DEFAULT_BUFFER)
     st.session_state.temp = deque(maxlen=DEFAULT_BUFFER)
     st.session_state.hum  = deque(maxlen=DEFAULT_BUFFER)
     st.session_state.last_alert_ts = 0.0
+if "alert_log" not in st.session_state:
+    st.session_state.alert_log = []  # guarda últimas N alertas
 
 # ------------------- Funciones core -------------------
 def notify_email(subject: str, body: str) -> str:
@@ -131,8 +133,14 @@ def chequear_alertas(temp, hum, th):
     now = time.time()
     if not th["alerts_on"]:
         return ""
+    # Silencio temporal (minutos contados desde la última alerta enviada)
+    mute_min = th.get("mute_min", 0) or 0
+    if mute_min and (now - st.session_state.last_alert_ts < mute_min * 60):
+        return ""
+    # Anti-spam básico
     if now - st.session_state.last_alert_ts < ALERT_COOLDOWN_S:
         return ""
+
     motivos = []
     if temp >= th["temp_crit"]:
         motivos.append(f"Temp CRÍTICA ({temp:.1f}°C ≥ {th['temp_crit']}°C)")
@@ -142,14 +150,21 @@ def chequear_alertas(temp, hum, th):
         motivos.append(f"Humedad CRÍTICA ({hum:.1f}% ≥ {th['hum_crit']}%)")
     elif hum >= th["hum_warn"]:
         motivos.append(f"Humedad ALTA ({hum:.1f}% ≥ {th['hum_warn']}%)")
+
     if motivos:
         body = (
             "Se detectaron condiciones de riesgo:\n"
             + "\n".join(f"- {m}" for m in motivos)
-            + f"\n\nTimestamp: {pd.Timestamp.now()}\nSistema: {APP_TITLE}"
+            + f"\n\nLecturas: Temp={temp:.1f}°C  Hum={hum:.1f}%"
+            + f"\nTimestamp: {pd.Timestamp.now()}\nSistema: {APP_TITLE}"
         )
-        status = notify_email("⚠️ SmartSensor: Alerta de Condición Crítica", body)
+        subject = f"⚠️ SmartSensor: Temp {temp:.1f}°C / Hum {hum:.1f}%"
+        status = notify_email(subject, body)
         st.session_state.last_alert_ts = now
+        # Log en memoria (máx 50)
+        ts = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        st.session_state.alert_log.append(f"{ts} — {status} — {', '.join(motivos)}")
+        st.session_state.alert_log = st.session_state.alert_log[-50:]
         return status
     return ""
 
@@ -171,6 +186,7 @@ temp_crit = c2.number_input("Temp crit (°C)", value=40.0, step=0.5)
 c3, c4 = st.sidebar.columns(2)
 hum_warn  = c3.number_input("Hum warn (%)", value=70.0, step=1.0)
 hum_crit  = c4.number_input("Hum crit (%)", value=85.0, step=1.0)
+mute_min  = st.sidebar.number_input("Silenciar alertas (min)", min_value=0, max_value=120, value=0, step=5)
 
 st.sidebar.markdown("---")
 filters_on = st.sidebar.multiselect(
@@ -187,7 +203,6 @@ if st.session_state.t.maxlen != buf:
     st.session_state.t = deque(st.session_state.t, maxlen=buf)
     st.session_state.temp = deque(st.session_state.temp, maxlen=buf)
     st.session_state.hum  = deque(st.session_state.hum,  maxlen=buf)
-
 
 # ------------------- Simulación (un tick por render) -------------------
 n = (st.session_state.t[-1] + 1) if len(st.session_state.t) else 0
@@ -222,6 +237,7 @@ thresholds = dict(
     alerts_on=alerts_on,
     temp_warn=temp_warn, temp_crit=temp_crit,
     hum_warn=hum_warn,   hum_crit=hum_crit,
+    mute_min=mute_min,
 )
 status = chequear_alertas(temp[-1], hum[-1], thresholds)
 if status:
@@ -262,6 +278,27 @@ fig_h.add_hline(y=hum_crit, line_dash="dot", line_color="red",    annotation_tex
 fig_h.update_layout(template="plotly_dark", height=360, margin=dict(l=30, r=20, t=30, b=30),
                     legend=dict(orientation="h"))
 colB.plotly_chart(fig_h, use_container_width=True)
+
+# ----- Descarga CSV -----
+df = pd.DataFrame({
+    "tick": list(st.session_state.t),
+    "temp": list(st.session_state.temp),
+    "hum":  list(st.session_state.hum),
+})
+st.download_button(
+    "Descargar últimas lecturas (CSV)",
+    df.to_csv(index=False).encode("utf-8"),
+    file_name="smartsensor_lecturas.csv",
+    mime="text/csv"
+)
+
+# ----- Historial de alertas -----
+with st.expander("Historial de alertas (últimas 50)"):
+    if st.session_state.alert_log:
+        for row in reversed(st.session_state.alert_log):
+            st.write("•", row)
+    else:
+        st.caption("Sin alertas registradas en esta sesión.")
 
 st.info("En la nube, carga credenciales en *Settings → Secrets*. Localmente usa `.streamlit/secrets.toml`.")
 
