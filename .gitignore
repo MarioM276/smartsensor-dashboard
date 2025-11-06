@@ -1,10 +1,12 @@
 # Python
-.venv/
 __pycache__/
 *.pyc
 
-# Streamlit
-.streamlit/secrets.toml
+# Entornos / IDE
+.venv/
+venv/
+.env
+*.code-workspace
 
-# Sistemas
-.DS_Store
+# Streamlit secretos locales
+.streamlit/secrets.toml
