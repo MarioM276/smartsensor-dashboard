@@ -1,4 +1,4 @@
-# SmartSensor Industrial Dashboard (Streamlit)
+# SmartSensor Industrial Dashboard (Streamlit) by Mario Moreno
 
 Simulación de sensores (temperatura/humedad) con filtros digitales (Media, Mediana, Exponencial, Savitzky–Golay) y alertas por email vía SMTP.
 
