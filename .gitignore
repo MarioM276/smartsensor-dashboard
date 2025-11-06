@@ -1,14 +1,6 @@
-# Python
-__pycache__/
-*.pyc
-
-# Entornos virtuales
 venv/
 .venv/
-
-# Credenciales locales
 .env
 .streamlit/secrets.toml
-
-# Otros
-.DS_Store
+__pycache__/
+*.pyc
